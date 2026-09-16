@@ -9,6 +9,7 @@ const ffmpegPath = 'ffmpeg';
 const ffprobePath = 'ffprobe';
 
 let mainWindow;
+let activeFfmpegProcess = null; // NEW: Track the running FFmpeg instance
 
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -29,12 +30,20 @@ app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
 });
 
+app.on('before-quit', () => {
+    // If the app is closing, forcefully kill FFmpeg if it's running
+    if (activeFfmpegProcess) {
+        console.log("Killing active FFmpeg process...");
+        activeFfmpegProcess.kill('SIGKILL');
+    }
+});
+
 // 1. HANDLER: Select Video & Get Duration
 ipcMain.handle('select-video', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
         title: 'Select Video',
         properties: ['openFile'],
-        filters: [{ name: 'Videos', extensions: ['mp4', 'mkv', 'avi', 'mov', 'm4v'] }]
+        filters: [{ name: 'Videos', extensions: ['mp4', 'mkv', 'avi', 'mov', 'm4v', 'webm'] }]
     });
 
     if (canceled || filePaths.length === 0) return null;
@@ -106,19 +115,21 @@ ipcMain.handle('process-video', async (event, data) => {
             '-map', '0:a?', 
             '-c:v', 'libx264',
             '-pix_fmt', 'yuv420p',
-            '-preset', 'fast',
-            '-c:a', 'copy',
+            '-preset', 'ultrafast',
+            '-threads', '0',
+            '-c:a', 'aac',
             filePath
         ];
 
         return await new Promise((resolve) => {
-            const ffmpegProcess = spawn(ffmpegPath, args);
+            // Assign to our global tracker
+            activeFfmpegProcess = spawn(ffmpegPath, args);
             let ffmpegLogs = '';
 
             let lastSpeed = 'N/A';
             let lastFps = '0';
 
-            ffmpegProcess.stderr.on('data', (data) => {
+            activeFfmpegProcess.stderr.on('data', (data) => {
                 const output = data.toString();
                 ffmpegLogs += output;
 
@@ -135,8 +146,6 @@ ipcMain.handle('process-video', async (event, data) => {
                     const [hours, minutes, seconds] = timeStr.split(':');
                     const currentSeconds = parseInt(hours) * 3600 + parseInt(minutes) * 60 + parseFloat(seconds);
                     const percent = Math.min((currentSeconds / duration) * 100, 100);
-
-                    // Send progress details to UI
                     mainWindow.webContents.send('ffmpeg-progress', {
                         percent: percent,
                         speed: lastSpeed,
@@ -146,7 +155,8 @@ ipcMain.handle('process-video', async (event, data) => {
                 }
             });
 
-            ffmpegProcess.on('close', (code) => {
+            activeFfmpegProcess.on('close', (code) => {
+                activeFfmpegProcess = null; // Clear it when done
                 if (code === 0) {
                     resolve({ success: true });
                 } else {
