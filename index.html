@@ -3,9 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Video Encryptor & Decryptor</title>
-    <!-- CryptoJS for Encryption/Decryption -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
-    <!-- FFmpeg WASM (v0.11.x) -->
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f7f6; padding: 20px; display: flex; justify-content: center; }
@@ -18,6 +16,9 @@
         button:hover { background: #0056b3; }
         button:disabled { background: #aaa; cursor: not-allowed; }
         
+        .password-container { display: flex; align-items: center; gap: 10px; }
+        .password-container label { margin-bottom: 0; font-weight: normal; font-size: 14px; white-space: nowrap; display: flex; align-items: center; gap: 5px; cursor: pointer; }
+
         /* Dual Slider CSS */
         .slider-container { position: relative; width: 100%; height: 30px; margin-top: 10px; }
         .slider-container input[type="range"] {
@@ -34,7 +35,9 @@
         
         /* Utility */
         .hidden { display: none !important; }
-        #status-msg { margin-top: 15px; font-size: 14px; color: #007bff; font-weight: bold; text-align: center; }
+        #status-container { margin-top: 15px; text-align: center; }
+        #status-msg { font-size: 14px; color: #007bff; font-weight: bold; margin-bottom: 5px; }
+        progress { width: 100%; height: 15px; border-radius: 5px; }
         .error { color: red !important; }
     </style>
 </head>
@@ -58,18 +61,25 @@
                 <div class="slider-track-highlight" id="slider-highlight"></div>
             </div>
             <div class="time-display">
-                <span>Earliest: <span id="min-val">0</span>s</span>
-                <span>Latest: <span id="max-val">0</span>s</span>
+                <span>Earliest: <span id="min-val">00:00:00</span></span>
+                <span>Latest: <span id="max-val">00:00:00</span></span>
             </div>
         </div>
 
         <div class="form-group">
             <label for="secret-phrase">Secret Phrase</label>
-            <input type="password" id="secret-phrase" placeholder="Enter the secret you want to hide...">
+            <div class="password-container">
+                <input type="password" id="secret-phrase" placeholder="Enter the secret you want to hide...">
+                <label><input type="checkbox" id="toggle-secret"> Show</label>
+            </div>
         </div>
 
         <button id="generate-btn">Generate Video & Encrypt</button>
-        <div id="status-msg"></div>
+        
+        <div id="status-container" class="hidden">
+            <div id="status-msg"></div>
+            <progress id="progress-bar" value="0" max="100"></progress>
+        </div>
     </div>
 
     <!-- DECRYPTION VIEW -->
@@ -83,7 +93,7 @@
         </div>
 
         <button id="decrypt-btn">Decrypt</button>
-        <div id="decrypt-status" class="status-msg" style="margin-top:15px; text-align:center;"></div>
+        <div id="decrypt-status" style="margin-top:15px; text-align:center; font-weight:bold;"></div>
     </div>
 
     <script>
@@ -102,10 +112,24 @@
         const maxVal = document.getElementById('max-val');
         const sliderHighlight = document.getElementById('slider-highlight');
         const generateBtn = document.getElementById('generate-btn');
+        const statusContainer = document.getElementById('status-container');
         const statusMsg = document.getElementById('status-msg');
+        const progressBar = document.getElementById('progress-bar');
+        const secretPhraseInput = document.getElementById('secret-phrase');
+        const toggleSecret = document.getElementById('toggle-secret');
 
         let videoMeta = { width: 0, height: 0, duration: 0, file: null };
         const { createFFmpeg, fetchFile } = FFmpeg;
+
+        // Toggle Secret Phrase visibility
+        toggleSecret.addEventListener('change', function() {
+            secretPhraseInput.type = this.checked ? 'text' : 'password';
+        });
+
+        // Helper: Convert seconds to HH:MM:SS
+        function formatTime(seconds) {
+            return new Date(seconds * 1000).toISOString().substring(11, 19);
+        }
 
         // Route App based on Query Params
         const urlParams = new URLSearchParams(window.location.search);
@@ -125,8 +149,8 @@
             let max = parseInt(maxSlider.value);
             if (min > max) { let tmp = max; max = min; min = tmp; }
             
-            minVal.textContent = min;
-            maxVal.textContent = max;
+            minVal.textContent = formatTime(min);
+            maxVal.textContent = formatTime(max);
             
             const total = minSlider.max - minSlider.min;
             const leftPercent = (min / total) * 100;
@@ -146,7 +170,6 @@
                 updateSliderTrack();
             });
 
-            // Read Video Metadata
             videoUpload.addEventListener('change', (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -168,32 +191,28 @@
             generateBtn.addEventListener('click', processVideo);
         }
 
-        // --- IMAGE GENERATION (CANVAS) ---
+        // --- IMAGE GENERATION ---
         async function createLetterImage(letter, index, width, height) {
             const canvas = document.createElement('canvas');
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext('2d');
 
-            // Random Background
             const r = Math.floor(Math.random() * 256);
             const g = Math.floor(Math.random() * 256);
             const b = Math.floor(Math.random() * 256);
             ctx.fillStyle = `rgb(${r},${g},${b})`;
             ctx.fillRect(0, 0, width, height);
 
-            // Calculate luminance to ensure readability
             const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
             ctx.fillStyle = luminance > 128 ? '#000000' : '#FFFFFF';
 
-            // Draw Main Letter (50% of image height)
             const mainFontSize = Math.floor(height * 0.5);
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.font = `bold ${mainFontSize}px "Comic Sans MS", "Comic Sans", cursive, sans-serif`;
             ctx.fillText(letter.toUpperCase(), width / 2, height / 2);
 
-            // Draw Letter Position (Top Left, half the size of main letter)
             const subFontSize = Math.floor(mainFontSize * 0.5);
             ctx.textAlign = 'left';
             ctx.textBaseline = 'top';
@@ -201,23 +220,18 @@
             ctx.fillText(index.toString(), 20, 20);
 
             return new Promise(resolve => {
-                canvas.toBlob(blob => {
-                    resolve(new File([blob], `img_${index}.png`, { type: 'image/png' }));
-                });
+                canvas.toBlob(blob => resolve(new File([blob], `img_${index}.png`, { type: 'image/png' })));
             });
         }
 
-        // --- TIMESTAMP GENERATION ---
+        // --- TIMESTAMP LOGIC ---
         function calculateTimestamps(wordLength, startRange, endRange) {
-            // Calculate minimum time required for all letters and gaps
-            // Gap required between END of img1 and START of img2 is 60s
-            // Thus start[i] >= start[i-1] + IMAGE_DURATION + MIN_GAP_SECONDS
             const cycleTime = IMAGE_DURATION + MIN_GAP_SECONDS;
             const requiredTime = (wordLength - 1) * cycleTime + IMAGE_DURATION;
             const availableTime = endRange - startRange;
 
             if (availableTime < requiredTime) {
-                throw new Error(`Time range too small! You need at least ${requiredTime} seconds for a ${wordLength}-letter word.`);
+                throw new Error(`Time range too small! You need at least ${formatTime(requiredTime)} for a ${wordLength}-letter word.`);
             }
 
             let timestamps = [];
@@ -225,22 +239,34 @@
             let remainingSlack = availableTime - requiredTime;
 
             for (let i = 0; i < wordLength; i++) {
-                // Randomly distribute the remaining slack time
                 const slackForThisStep = Math.random() * (remainingSlack / (wordLength - i));
                 remainingSlack -= slackForThisStep;
 
                 const t = currentMinStart + slackForThisStep;
                 timestamps.push(t.toFixed(2));
-                
-                // Next possible start time
                 currentMinStart = t + cycleTime;
             }
             return timestamps;
         }
 
-        // --- MAIN PROCESSING (FFMPEG) ---
+        // Helper: Read file with progress for the upload phase
+        function readFileWithProgress(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        progressBar.value = (e.loaded / e.total) * 100;
+                    }
+                };
+                reader.onload = () => resolve(new Uint8Array(reader.result));
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // --- MAIN PROCESSING ---
         async function processVideo() {
-            const secretPhrase = document.getElementById('secret-phrase').value.trim();
+            const secretPhrase = secretPhraseInput.value.trim();
             if (!videoMeta.file || !secretPhrase) {
                 alert("Please select a video and enter a secret phrase.");
                 return;
@@ -248,8 +274,6 @@
 
             const earliestTime = parseInt(minSlider.value);
             const latestTime = parseInt(maxSlider.value);
-            
-            // Choose word
             const word = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
             
             let timestamps;
@@ -260,20 +284,38 @@
                 return;
             }
 
-            statusMsg.textContent = "Loading FFmpeg (this may take a moment)...";
+            // --- DEBUG OUTPUT ---
+            console.log(`[DEBUG] Chosen Decryption Word: "${word}"`);
+            word.split('').forEach((char, i) => {
+                const start = parseFloat(timestamps[i]).toFixed(2);
+                const end = (parseFloat(timestamps[i]) + IMAGE_DURATION).toFixed(2);
+                console.log(`[DEBUG] Letter ${i+1}: '${char.toUpperCase()}' | Scheduled Time: ${formatTime(start)} -> ${formatTime(end)} (${start}s - ${end}s)`);
+            });
+
+            statusContainer.classList.remove('hidden');
+            statusMsg.textContent = "Loading FFmpeg...";
             statusMsg.className = "";
+            progressBar.value = 0;
             generateBtn.disabled = true;
 
             try {
-                const ffmpeg = createFFmpeg({ log: true });
+                const ffmpeg = createFFmpeg({ log: false });
+                
+                // Track FFmpeg generation progress
+                ffmpeg.setProgress(({ ratio }) => {
+                    // ratio is 0.0 to 1.0
+                    progressBar.value = Math.max(0, Math.min(ratio * 100, 100));
+                });
+
                 if (!ffmpeg.isLoaded()) await ffmpeg.load();
 
-                statusMsg.textContent = "Generating images & Preparing Virtual Filesystem...";
-                
-                // Write Video
-                ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(videoMeta.file));
+                statusMsg.textContent = "Loading video into memory...";
+                const fileData = await readFileWithProgress(videoMeta.file);
+                ffmpeg.FS('writeFile', 'input.mp4', fileData);
 
-                // Generate and Write Images
+                statusMsg.textContent = "Generating images & Preparing Timeline...";
+                progressBar.value = 0; // Reset for the actual FFmpeg video processing
+                
                 let filterGraph = "";
                 let inputArgs = ['-i', 'input.mp4'];
 
@@ -284,7 +326,6 @@
                     
                     inputArgs.push('-i', fileName);
 
-                    // Build Filtergraph chain
                     const inBase = i === 0 ? '0:v' : `v${i}`;
                     const outBase = `v${i + 1}`;
                     const tStart = timestamps[i];
@@ -295,13 +336,13 @@
                     filterGraph += `[${inBase}][${i + 1}:v]overlay=enable='between(t,${tStart},${tEnd})'[${outLabel}];`;
                 }
 
-                statusMsg.textContent = "Processing video (inserting letters)...";
+                statusMsg.textContent = "Rendering final video... (This might take a while)";
 
                 const args = [
                     ...inputArgs,
                     '-filter_complex', filterGraph,
                     '-map', '[outv]',
-                    '-map', '0:a?', // Keep audio if present
+                    '-map', '0:a?', 
                     '-c:a', 'copy',
                     '-preset', 'ultrafast',
                     'output.mp4'
@@ -311,7 +352,6 @@
 
                 statusMsg.textContent = "Finalizing and Encrypting...";
                 
-                // Download Output
                 const data = ffmpeg.FS('readFile', 'output.mp4');
                 const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
                 const downloadLink = document.createElement('a');
@@ -319,7 +359,6 @@
                 downloadLink.download = 'cipher_video.mp4';
                 downloadLink.click();
 
-                // Encrypt & Redirect
                 const encrypted = CryptoJS.AES.encrypt(secretPhrase, word).toString();
                 const safeEncrypted = encodeURIComponent(encrypted);
                 
@@ -330,7 +369,7 @@
 
             } catch (err) {
                 console.error(err);
-                statusMsg.textContent = "An error occurred during video processing.";
+                statusMsg.textContent = "An error occurred during processing.";
                 statusMsg.className = "error";
                 generateBtn.disabled = false;
             }
@@ -346,7 +385,6 @@
                 const now = Date.now();
                 const lastAttempt = localStorage.getItem('lastDecryptAttempt') || 0;
                 
-                // 1 Minute Rate Limit
                 if (now - lastAttempt < 60000) {
                     const remaining = Math.ceil((60000 - (now - lastAttempt)) / 1000);
                     decryptStatus.textContent = `Please wait ${remaining} seconds before trying again.`;
