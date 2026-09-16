@@ -1,3 +1,4 @@
+const http = require('http');
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -37,6 +38,56 @@ app.on('before-quit', () => {
         activeFfmpegProcess.kill('SIGKILL');
     }
 });
+
+// --- LOCAL WEBSERVER LOGIC ---
+let localServer = null;
+let activeSecret = ''; // Store the current secret
+
+function getLocalIP() {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+        }
+    }
+    return '127.0.0.1';
+}
+
+ipcMain.handle('start-server', async (event, secret) => {
+    activeSecret = secret; // Update the secret whenever the server is started
+    
+    if (localServer) return `http://${getLocalIP()}:8080`;
+    
+    return new Promise((resolve) => {
+        localServer = http.createServer((req, res) => {
+            // Automatically redirect the base URL to the active secret
+            if (req.url === '/') {
+                res.writeHead(302, { 'Location': `/?secret=${activeSecret}` });
+                res.end();
+            } 
+            // Serve the UI if they have a secret in the URL
+            else if (req.url.startsWith('/?secret=')) {
+                fs.readFile(path.join(__dirname, 'index.html'), (err, data) => {
+                    if (err) { res.writeHead(500); res.end('Error'); return; }
+                    res.writeHead(200, { 'Content-Type': 'text/html' });
+                    res.end(data);
+                });
+            } else {
+                res.writeHead(404); res.end();
+            }
+        });
+        
+        localServer.listen(8080, '0.0.0.0', () => {
+            resolve(`http://${getLocalIP()}:8080`);
+        });
+    });
+});
+
+ipcMain.handle('stop-server', () => {
+    if (localServer) { localServer.close(); localServer = null; }
+    return true;
+});
+// -----------------------------
 
 // 1. HANDLER: Select Video & Get Duration
 ipcMain.handle('select-video', async () => {

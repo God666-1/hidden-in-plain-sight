@@ -92,6 +92,12 @@
 
         <button id="decrypt-btn">Decrypt</button>
         <div id="decrypt-status" style="margin-top:15px; text-align:center; font-weight:bold;"></div>
+        <div id="server-controls" class="hidden" style="margin-top: 25px; padding-top: 15px; border-top: 1px solid #ddd;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+                <input type="checkbox" id="toggle-server"> Enable remote browser unlock (Local Network)
+            </label>
+            <div id="server-url" style="margin-top: 10px; font-size: 13px; font-weight: bold; color: #007bff; word-break: break-all;"></div>
+        </div>
     </div>
 
     <script>
@@ -323,6 +329,31 @@
                     document.getElementById('decrypt-status').className = "error";
                 }
             });
+
+            // NEW: Server Toggle Logic
+            // Only show the server controls if we are inside the Electron app (window.api exists)
+            if (window.api) {
+                document.getElementById('server-controls').classList.remove('hidden');
+                
+                document.getElementById('toggle-server').addEventListener('change', async function() {
+                    const urlDisplay = document.getElementById('server-url');
+                    if (this.checked) {
+                        urlDisplay.textContent = "Starting server...";
+                        // Make sure the secret is URL-safe before sending it to the server
+                        const safeSecret = encodeURIComponent(encryptedSecret);
+                        
+                        // Pass the secret into the startServer function
+                        const baseUrl = await window.api.startServer(safeSecret);
+                        const fullUrl = `${baseUrl}/?secret=${safeSecret}`;
+                        
+                        // Show the short Base URL for the user to type in manually
+                        urlDisplay.innerHTML = `Access via Network:<br><a href="${baseUrl}" target="_blank">${baseUrl}</a>`;
+                    } else {
+                        await window.api.stopServer();
+                        urlDisplay.innerHTML = "";
+                    }
+                });
+            }
         }
     </script>
 </body>
