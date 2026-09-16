@@ -331,7 +331,7 @@
             generateBtn.disabled = true;
 
             try {
-                const ffmpeg = createFFmpeg({ log: false });
+                const ffmpeg = createFFmpeg({ log: true });
                 
                 ffmpeg.setProgress(({ ratio }) => {
                     progressBar.value = Math.max(0, Math.min(ratio * 100, 100));
@@ -351,7 +351,6 @@
 
                 for (let i = 0; i < letterData.length; i++) {
                     const item = letterData[i];
-                    // Pass the original position (item.pos) so the user knows where the letter goes
                     const imgFile = await createLetterImage(item.char, item.pos, videoMeta.width, videoMeta.height);
                     const fileName = `img${i}.png`;
                     ffmpeg.FS('writeFile', fileName, await fetchFile(imgFile));
@@ -368,6 +367,11 @@
                     filterGraph += `[${inBase}][${i + 1}:v]overlay=enable='between(t,${tStart},${tEnd})'[${outLabel}];`;
                 }
 
+                // FIXED: Remove the trailing semicolon!
+                if (filterGraph.endsWith(';')) {
+                    filterGraph = filterGraph.slice(0, -1);
+                }
+
                 statusMsg.textContent = "Rendering final video... (This might take a while)";
 
                 const args = [
@@ -375,7 +379,9 @@
                     '-filter_complex', filterGraph,
                     '-map', '[outv]',
                     '-map', '0:a?', 
-                    '-c:a', 'copy',
+                    '-c:v', 'libx264',     // Force H.264 encoding
+                    '-pix_fmt', 'yuv420p', // Force standard MP4 pixel format
+                    '-c:a', 'copy',        // Keep original audio
                     '-preset', 'ultrafast',
                     'output.mp4'
                 ];
@@ -384,7 +390,13 @@
 
                 statusMsg.textContent = "Finalizing and Encrypting...";
                 
-                const data = ffmpeg.FS('readFile', 'output.mp4');
+                let data;
+                try {
+                    data = ffmpeg.FS('readFile', 'output.mp4');
+                } catch (readErr) {
+                    throw new Error("FFmpeg failed to create output.mp4. Check the browser console (F12) for the exact FFmpeg error.");
+                }
+
                 const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
                 const downloadLink = document.createElement('a');
                 downloadLink.href = URL.createObjectURL(videoBlob);
@@ -401,7 +413,7 @@
 
             } catch (err) {
                 console.error(err);
-                statusMsg.textContent = "An error occurred during processing.";
+                statusMsg.textContent = err.message || "An error occurred during processing.";
                 statusMsg.className = "error";
                 generateBtn.disabled = false;
             }
