@@ -46,8 +46,9 @@
         <h2>Create Video Cipher</h2>
         
         <div class="form-group">
-            <label for="video-upload">Select Video</label>
-            <input type="file" id="video-upload" accept="video/mp4,video/x-m4v,video/*">
+            <label>Select Video</label>
+            <button id="select-video-btn" type="button" style="background: #6c757d; margin-bottom: 5px;">Browse Computer...</button>
+            <div id="video-file-name" style="font-size: 13px; color: #666; word-break: break-all;">No video selected</div>
         </div>
 
         <div class="form-group">
@@ -157,44 +158,26 @@
                 maxSlider.style.zIndex = 4; minSlider.style.zIndex = 3;
                 updateSliderTrack();
             });
-
-            videoUpload.addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
+            
+            document.getElementById('select-video-btn').addEventListener('click', async () => {
+                const result = await window.api.selectVideo();
+                if (!result) return; // User cancelled the dialog
                 
-                // FIX: Instantly save the native path so the button always works
-                videoMeta.path = file.path;
+                videoMeta.path = result.path;
+                videoMeta.duration = result.duration;
+                // Just for the canvas images, we'll force a standard 720p 16:9 box 
+                // since we don't have visual access to the file in the browser
+                videoMeta.width = 1280; 
+                videoMeta.height = 720;
                 
-                const video = document.createElement('video');
-                video.preload = 'metadata';
+                // Update UI text
+                document.getElementById('video-file-name').textContent = result.path;
                 
-                // If NixOS Electron CAN read the video, get exact metadata
-                video.onloadedmetadata = function() {
-                    window.URL.revokeObjectURL(video.src);
-                    videoMeta.width = video.videoWidth;
-                    videoMeta.height = video.videoHeight;
-                    videoMeta.duration = Math.floor(video.duration);
-                    
-                    minSlider.max = videoMeta.duration; 
-                    maxSlider.max = videoMeta.duration; 
-                    maxSlider.value = videoMeta.duration;
-                    updateSliderTrack();
-                };
-                
-                // If NixOS Electron CANNOT read proprietary MP4s, use safe fallbacks
-                video.onerror = function() {
-                    console.warn("NixOS Chromium lacks H.264 codecs. Using fallback metadata.");
-                    videoMeta.width = 1280;
-                    videoMeta.height = 720;
-                    videoMeta.duration = 600; // Default slider to 10 minutes (600s)
-                    
-                    minSlider.max = 600; 
-                    maxSlider.max = 600; 
-                    maxSlider.value = 600;
-                    updateSliderTrack();
-                };
-                
-                video.src = URL.createObjectURL(file);
+                // Update Sliders
+                minSlider.max = videoMeta.duration; 
+                maxSlider.max = videoMeta.duration; 
+                maxSlider.value = videoMeta.duration;
+                updateSliderTrack();
             });
 
             generateBtn.addEventListener('click', processVideo);
@@ -240,20 +223,26 @@
             return timestamps;
         }
 
-        // Listen for progress from the native backend
-        window.api.onProgress((percent) => {
-            progressBar.value = percent;
+        // Listen for progress and speed updates from the native backend
+        window.api.onProgress((data) => {
+            progressBar.value = data.percent;
+            
+            // Format status with percentage, encoding speed, and FPS
+            statusMsg.textContent = `Encoding: ${data.percent.toFixed(1)}% | Speed: ${data.speed} (${data.fps} fps)`;
+            
+            // Optional: log to DevTools console
+            console.log(`[FFmpeg] ${data.time} | ${data.percent.toFixed(1)}% | Speed: ${data.speed} | FPS: ${data.fps}`);
         });
 
         async function processVideo() {
             const secretPhrase = secretPhraseInput.value.trim();
-            const file = videoUpload.files[0];
             
-            // Double check both the file input and our meta object
-            if ((!videoMeta.path && !file) || !secretPhrase) {
+            // Check against the native path we stored from the dialog
+            if (!videoMeta.path || !secretPhrase) {
                 alert("Please select a video and enter a secret phrase."); 
                 return;
             }
+
             // Ensure path is set even if metadata completely stalled
             if (!videoMeta.path) videoMeta.path = file.path;
             

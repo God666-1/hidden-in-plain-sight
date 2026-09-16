@@ -3,7 +3,10 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
-const ffmpegPath = 'ffmpeg';
+
+// NixOS: use system FFmpeg/ffprobe binaries
+const ffmpegPath = 'ffmpeg'; 
+const ffprobePath = 'ffprobe';
 
 let mainWindow;
 
@@ -26,7 +29,38 @@ app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
 });
 
-// Listen for the processing request from the frontend
+// 1. HANDLER: Select Video & Get Duration
+ipcMain.handle('select-video', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        title: 'Select Video',
+        properties: ['openFile'],
+        filters: [{ name: 'Videos', extensions: ['mp4', 'mkv', 'avi', 'mov', 'm4v'] }]
+    });
+
+    if (canceled || filePaths.length === 0) return null;
+    const videoPath = filePaths[0];
+
+    return new Promise((resolve) => {
+        const ffprobe = spawn(ffprobePath, [
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            videoPath
+        ]);
+        
+        let out = '';
+        ffprobe.stdout.on('data', d => out += d.toString());
+        
+        ffprobe.on('close', () => {
+            const duration = Math.floor(parseFloat(out)) || 600; 
+            resolve({ path: videoPath, duration: duration });
+        });
+        
+        ffprobe.on('error', () => resolve({ path: videoPath, duration: 600 }));
+    });
+});
+
+// 2. HANDLER: Process the Video
 ipcMain.handle('process-video', async (event, data) => {
     const { videoPath, images, timestamps, duration } = data;
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'video-cipher-'));
@@ -46,7 +80,7 @@ ipcMain.handle('process-video', async (event, data) => {
             const inBase = i === 0 ? '0:v' : `v${i}`;
             const outBase = `v${i + 1}`;
             const tStart = timestamps[i];
-            const tEnd = (parseFloat(tStart) + 3).toFixed(2); // 3 seconds duration
+            const tEnd = (parseFloat(tStart) + 3).toFixed(2); // 3 seconds
             const isLast = i === images.length - 1;
             const outLabel = isLast ? 'outv' : outBase;
             
@@ -55,7 +89,6 @@ ipcMain.handle('process-video', async (event, data) => {
 
         if (filterGraph.endsWith(';')) filterGraph = filterGraph.slice(0, -1);
 
-        // Ask user where to save the final video
         const { filePath } = await dialog.showSaveDialog(mainWindow, {
             title: 'Save Cipher Video',
             defaultPath: 'cipher_video.mp4',
@@ -73,25 +106,43 @@ ipcMain.handle('process-video', async (event, data) => {
             '-map', '0:a?', 
             '-c:v', 'libx264',
             '-pix_fmt', 'yuv420p',
-            '-preset', 'fast',  // Native CPU is fast enough to use 'fast' instead of 'ultrafast'
+            '-preset', 'fast',
             '-c:a', 'copy',
             filePath
         ];
 
-        return new Promise((resolve, reject) => {
+        return await new Promise((resolve) => {
             const ffmpegProcess = spawn(ffmpegPath, args);
+            let ffmpegLogs = '';
 
-            // Listen to FFmpeg stderr to calculate progress
+            let lastSpeed = 'N/A';
+            let lastFps = '0';
+
             ffmpegProcess.stderr.on('data', (data) => {
                 const output = data.toString();
-                // Simple regex to extract time="hh:mm:ss"
-                const timeMatch = output.match(/time=(\d{2}:\d{2}:\d{2}.\d{2})/);
+                ffmpegLogs += output;
+
+                // Extract speed and fps if present in the chunk
+                const speedMatch = output.match(/speed=\s*([\d.]+x|N\/A)/);
+                const fpsMatch = output.match(/fps=\s*([\d.]+)/);
+                if (speedMatch) lastSpeed = speedMatch[1];
+                if (fpsMatch) lastFps = fpsMatch[1];
+
+                // Extract current time and calculate progress
+                const timeMatch = output.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/);
                 if (timeMatch) {
                     const timeStr = timeMatch[1];
                     const [hours, minutes, seconds] = timeStr.split(':');
                     const currentSeconds = parseInt(hours) * 3600 + parseInt(minutes) * 60 + parseFloat(seconds);
                     const percent = Math.min((currentSeconds / duration) * 100, 100);
-                    mainWindow.webContents.send('ffmpeg-progress', percent);
+
+                    // Send progress details to UI
+                    mainWindow.webContents.send('ffmpeg-progress', {
+                        percent: percent,
+                        speed: lastSpeed,
+                        fps: lastFps,
+                        time: timeStr
+                    });
                 }
             });
 
@@ -99,7 +150,12 @@ ipcMain.handle('process-video', async (event, data) => {
                 if (code === 0) {
                     resolve({ success: true });
                 } else {
-                    resolve({ success: false, error: `FFmpeg exited with code ${code}` });
+                    const logLines = ffmpegLogs.trim().split('\n');
+                    const lastLines = logLines.slice(-5).join('\n');
+                    resolve({ 
+                        success: false, 
+                        error: `Exit Code ${code}. Reason:\n${lastLines}` 
+                    });
                 }
             });
         });
@@ -107,7 +163,6 @@ ipcMain.handle('process-video', async (event, data) => {
     } catch (error) {
         return { success: false, error: error.message };
     } finally {
-        // Cleanup temporary image files
-        fs.rmSync(tmpDir, { recursive: true, force: true });
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
     }
 });
