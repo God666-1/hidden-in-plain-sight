@@ -23,14 +23,25 @@
         .slider-container { position: relative; width: 100%; height: 30px; margin-top: 10px; }
         .slider-container input[type="range"] {
             position: absolute; width: 100%; -webkit-appearance: none; pointer-events: none;
-            background: transparent; z-index: 2; height: 5px; top: 50%; transform: translateY(-50%); margin: 0;
+            background: transparent; height: 5px; top: 50%; transform: translateY(-50%); margin: 0; outline: none;
         }
+        /* Webkit (Chrome, Safari, Edge) */
         .slider-container input[type="range"]::-webkit-slider-thumb {
-            pointer-events: all; -webkit-appearance: none; width: 18px; height: 18px;
+            pointer-events: all; -webkit-appearance: none; width: 20px; height: 20px;
             background: #007bff; border-radius: 50%; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
         }
+        /* Firefox */
+        .slider-container input[type="range"]::-moz-range-thumb {
+            pointer-events: all; width: 20px; height: 20px; border: none;
+            background: #007bff; border-radius: 50%; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        
         .slider-track { position: absolute; height: 5px; background: #ddd; width: 100%; top: 50%; transform: translateY(-50%); z-index: 1; border-radius: 3px; }
-        .slider-track-highlight { position: absolute; height: 5px; background: #007bff; top: 50%; transform: translateY(-50%); z-index: 1; border-radius: 3px; }
+        .slider-track-highlight { position: absolute; height: 5px; background: #007bff; top: 50%; transform: translateY(-50%); z-index: 2; border-radius: 3px; pointer-events: none; }
+        
+        #min-slider { z-index: 3; }
+        #max-slider { z-index: 4; }
+
         .time-display { display: flex; justify-content: space-between; font-size: 14px; color: #666; margin-top: 5px; }
         
         /* Utility */
@@ -55,10 +66,10 @@
         <div class="form-group">
             <label>Time Range (Earliest & Latest Time)</label>
             <div class="slider-container">
-                <input type="range" id="min-slider" min="0" max="100" value="0" step="1">
-                <input type="range" id="max-slider" min="0" max="100" value="100" step="1">
                 <div class="slider-track"></div>
                 <div class="slider-track-highlight" id="slider-highlight"></div>
+                <input type="range" id="min-slider" min="0" max="100" value="0" step="1">
+                <input type="range" id="max-slider" min="0" max="100" value="100" step="1">
             </div>
             <div class="time-display">
                 <span>Earliest: <span id="min-val">00:00:00</span></span>
@@ -126,7 +137,6 @@
             secretPhraseInput.type = this.checked ? 'text' : 'password';
         });
 
-        // Helper: Convert seconds to HH:MM:SS
         function formatTime(seconds) {
             return new Date(seconds * 1000).toISOString().substring(11, 19);
         }
@@ -145,14 +155,18 @@
 
         // --- DUAL SLIDER LOGIC ---
         function updateSliderTrack() {
-            let min = parseInt(minSlider.value);
-            let max = parseInt(maxSlider.value);
-            if (min > max) { let tmp = max; max = min; min = tmp; }
+            let min = parseInt(minSlider.value) || 0;
+            let max = parseInt(maxSlider.value) || 100;
+            
+            if (min > max) { 
+                let tmp = max; max = min; min = tmp; 
+            }
             
             minVal.textContent = formatTime(min);
             maxVal.textContent = formatTime(max);
             
-            const total = minSlider.max - minSlider.min;
+            const maxBound = parseInt(minSlider.max) || 100;
+            const total = maxBound > 0 ? maxBound : 100;
             const leftPercent = (min / total) * 100;
             const widthPercent = ((max - min) / total) * 100;
             
@@ -162,11 +176,21 @@
 
         function initGeneratorMode() {
             minSlider.addEventListener('input', () => {
-                if (parseInt(minSlider.value) > parseInt(maxSlider.value)) minSlider.value = maxSlider.value;
+                if (parseInt(minSlider.value) >= parseInt(maxSlider.value)) {
+                    minSlider.value = maxSlider.value - 1; 
+                }
+                // Bring active slider thumb to the front
+                minSlider.style.zIndex = 4;
+                maxSlider.style.zIndex = 3;
                 updateSliderTrack();
             });
             maxSlider.addEventListener('input', () => {
-                if (parseInt(maxSlider.value) < parseInt(minSlider.value)) maxSlider.value = minSlider.value;
+                if (parseInt(maxSlider.value) <= parseInt(minSlider.value)) {
+                    maxSlider.value = parseInt(minSlider.value) + 1;
+                }
+                // Bring active slider thumb to the front
+                maxSlider.style.zIndex = 4;
+                minSlider.style.zIndex = 3;
                 updateSliderTrack();
             });
 
@@ -249,7 +273,6 @@
             return timestamps;
         }
 
-        // Helper: Read file with progress for the upload phase
         function readFileWithProgress(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -274,7 +297,16 @@
 
             const earliestTime = parseInt(minSlider.value);
             const latestTime = parseInt(maxSlider.value);
+            
+            // Choose word and prepare for shuffling
             const word = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
+            let letterData = word.split('').map((char, index) => ({ char: char, pos: index + 1 }));
+            
+            // Fisher-Yates shuffle the letters so they appear out of order
+            for (let i = letterData.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [letterData[i], letterData[j]] = [letterData[j], letterData[i]];
+            }
             
             let timestamps;
             try {
@@ -286,10 +318,10 @@
 
             // --- DEBUG OUTPUT ---
             console.log(`[DEBUG] Chosen Decryption Word: "${word}"`);
-            word.split('').forEach((char, i) => {
+            letterData.forEach((item, i) => {
                 const start = parseFloat(timestamps[i]).toFixed(2);
                 const end = (parseFloat(timestamps[i]) + IMAGE_DURATION).toFixed(2);
-                console.log(`[DEBUG] Letter ${i+1}: '${char.toUpperCase()}' | Scheduled Time: ${formatTime(start)} -> ${formatTime(end)} (${start}s - ${end}s)`);
+                console.log(`[DEBUG] Image ${i+1} (Letter: '${item.char.toUpperCase()}', Original Pos: ${item.pos}) | Scheduled: ${formatTime(start)} -> ${formatTime(end)}`);
             });
 
             statusContainer.classList.remove('hidden');
@@ -301,9 +333,7 @@
             try {
                 const ffmpeg = createFFmpeg({ log: false });
                 
-                // Track FFmpeg generation progress
                 ffmpeg.setProgress(({ ratio }) => {
-                    // ratio is 0.0 to 1.0
                     progressBar.value = Math.max(0, Math.min(ratio * 100, 100));
                 });
 
@@ -314,13 +344,15 @@
                 ffmpeg.FS('writeFile', 'input.mp4', fileData);
 
                 statusMsg.textContent = "Generating images & Preparing Timeline...";
-                progressBar.value = 0; // Reset for the actual FFmpeg video processing
+                progressBar.value = 0;
                 
                 let filterGraph = "";
                 let inputArgs = ['-i', 'input.mp4'];
 
-                for (let i = 0; i < word.length; i++) {
-                    const imgFile = await createLetterImage(word[i], i + 1, videoMeta.width, videoMeta.height);
+                for (let i = 0; i < letterData.length; i++) {
+                    const item = letterData[i];
+                    // Pass the original position (item.pos) so the user knows where the letter goes
+                    const imgFile = await createLetterImage(item.char, item.pos, videoMeta.width, videoMeta.height);
                     const fileName = `img${i}.png`;
                     ffmpeg.FS('writeFile', fileName, await fetchFile(imgFile));
                     
@@ -330,7 +362,7 @@
                     const outBase = `v${i + 1}`;
                     const tStart = timestamps[i];
                     const tEnd = (parseFloat(tStart) + IMAGE_DURATION).toFixed(2);
-                    const isLast = i === word.length - 1;
+                    const isLast = i === letterData.length - 1;
                     const outLabel = isLast ? 'outv' : outBase;
                     
                     filterGraph += `[${inBase}][${i + 1}:v]overlay=enable='between(t,${tStart},${tEnd})'[${outLabel}];`;
