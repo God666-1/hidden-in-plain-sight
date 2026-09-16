@@ -4,9 +4,8 @@
     <meta charset="UTF-8">
     <title>Video Encryptor & Decryptor</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f7f6; padding: 20px; display: flex; justify-content: center; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f4f7f6; padding: 20px; display: flex; justify-content: center; }
         .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 500px; }
         h2 { margin-top: 0; color: #333; }
         .form-group { margin-bottom: 20px; }
@@ -19,32 +18,21 @@
         .password-container { display: flex; align-items: center; gap: 10px; }
         .password-container label { margin-bottom: 0; font-weight: normal; font-size: 14px; white-space: nowrap; display: flex; align-items: center; gap: 5px; cursor: pointer; }
 
-        /* Dual Slider CSS */
         .slider-container { position: relative; width: 100%; height: 30px; margin-top: 10px; }
         .slider-container input[type="range"] {
             position: absolute; width: 100%; -webkit-appearance: none; pointer-events: none;
             background: transparent; height: 5px; top: 50%; transform: translateY(-50%); margin: 0; outline: none;
         }
-        /* Webkit (Chrome, Safari, Edge) */
         .slider-container input[type="range"]::-webkit-slider-thumb {
             pointer-events: all; -webkit-appearance: none; width: 20px; height: 20px;
             background: #007bff; border-radius: 50%; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
         }
-        /* Firefox */
-        .slider-container input[type="range"]::-moz-range-thumb {
-            pointer-events: all; width: 20px; height: 20px; border: none;
-            background: #007bff; border-radius: 50%; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-        }
-        
         .slider-track { position: absolute; height: 5px; background: #ddd; width: 100%; top: 50%; transform: translateY(-50%); z-index: 1; border-radius: 3px; }
         .slider-track-highlight { position: absolute; height: 5px; background: #007bff; top: 50%; transform: translateY(-50%); z-index: 2; border-radius: 3px; pointer-events: none; }
-        
         #min-slider { z-index: 3; }
         #max-slider { z-index: 4; }
-
         .time-display { display: flex; justify-content: space-between; font-size: 14px; color: #666; margin-top: 5px; }
         
-        /* Utility */
         .hidden { display: none !important; }
         #status-container { margin-top: 15px; text-align: center; }
         #status-msg { font-size: 14px; color: #007bff; font-weight: bold; margin-bottom: 5px; }
@@ -54,7 +42,6 @@
 </head>
 <body>
 
-    <!-- GENERATOR VIEW -->
     <div id="generator-view" class="container hidden">
         <h2>Create Video Cipher</h2>
         
@@ -93,7 +80,6 @@
         </div>
     </div>
 
-    <!-- DECRYPTION VIEW -->
     <div id="decryption-view" class="container hidden">
         <h2>Decrypt Secret Phrase</h2>
         <p>Watch the video and piece together the letters to form the decryption word.</p>
@@ -108,12 +94,10 @@
     </div>
 
     <script>
-        // Configuration
         const WORD_LIST = ["planet", "galaxy", "rocket", "comet", "nebula"];
         const MIN_GAP_SECONDS = 60;
         const IMAGE_DURATION = 3;
 
-        // Elements
         const genView = document.getElementById('generator-view');
         const decView = document.getElementById('decryption-view');
         const videoUpload = document.getElementById('video-upload');
@@ -127,13 +111,10 @@
         const statusMsg = document.getElementById('status-msg');
         const progressBar = document.getElementById('progress-bar');
         const secretPhraseInput = document.getElementById('secret-phrase');
-        const toggleSecret = document.getElementById('toggle-secret');
+        
+        let videoMeta = { width: 0, height: 0, duration: 0, path: null };
 
-        let videoMeta = { width: 0, height: 0, duration: 0, file: null };
-        const { createFFmpeg, fetchFile } = FFmpeg;
-
-        // Toggle Secret Phrase visibility
-        toggleSecret.addEventListener('change', function() {
+        document.getElementById('toggle-secret').addEventListener('change', function() {
             secretPhraseInput.type = this.checked ? 'text' : 'password';
         });
 
@@ -141,7 +122,6 @@
             return new Date(seconds * 1000).toISOString().substring(11, 19);
         }
 
-        // Route App based on Query Params
         const urlParams = new URLSearchParams(window.location.search);
         const encryptedSecret = urlParams.get('secret');
 
@@ -153,44 +133,28 @@
             initGeneratorMode();
         }
 
-        // --- DUAL SLIDER LOGIC ---
         function updateSliderTrack() {
             let min = parseInt(minSlider.value) || 0;
             let max = parseInt(maxSlider.value) || 100;
-            
-            if (min > max) { 
-                let tmp = max; max = min; min = tmp; 
-            }
+            if (min > max) { let tmp = max; max = min; min = tmp; }
             
             minVal.textContent = formatTime(min);
             maxVal.textContent = formatTime(max);
             
-            const maxBound = parseInt(minSlider.max) || 100;
-            const total = maxBound > 0 ? maxBound : 100;
-            const leftPercent = (min / total) * 100;
-            const widthPercent = ((max - min) / total) * 100;
-            
-            sliderHighlight.style.left = leftPercent + "%";
-            sliderHighlight.style.width = widthPercent + "%";
+            const total = parseInt(minSlider.max) || 100;
+            sliderHighlight.style.left = (min / total) * 100 + "%";
+            sliderHighlight.style.width = ((max - min) / total) * 100 + "%";
         }
 
         function initGeneratorMode() {
             minSlider.addEventListener('input', () => {
-                if (parseInt(minSlider.value) >= parseInt(maxSlider.value)) {
-                    minSlider.value = maxSlider.value - 1; 
-                }
-                // Bring active slider thumb to the front
-                minSlider.style.zIndex = 4;
-                maxSlider.style.zIndex = 3;
+                if (parseInt(minSlider.value) >= parseInt(maxSlider.value)) minSlider.value = maxSlider.value - 1; 
+                minSlider.style.zIndex = 4; maxSlider.style.zIndex = 3;
                 updateSliderTrack();
             });
             maxSlider.addEventListener('input', () => {
-                if (parseInt(maxSlider.value) <= parseInt(minSlider.value)) {
-                    maxSlider.value = parseInt(minSlider.value) + 1;
-                }
-                // Bring active slider thumb to the front
-                maxSlider.style.zIndex = 4;
-                minSlider.style.zIndex = 3;
+                if (parseInt(maxSlider.value) <= parseInt(minSlider.value)) maxSlider.value = parseInt(minSlider.value) + 1;
+                maxSlider.style.zIndex = 4; minSlider.style.zIndex = 3;
                 updateSliderTrack();
             });
 
@@ -198,74 +162,77 @@
                 const file = e.target.files[0];
                 if (!file) return;
                 
+                // FIX: Instantly save the native path so the button always works
+                videoMeta.path = file.path;
+                
                 const video = document.createElement('video');
                 video.preload = 'metadata';
+                
+                // If NixOS Electron CAN read the video, get exact metadata
                 video.onloadedmetadata = function() {
                     window.URL.revokeObjectURL(video.src);
-                    videoMeta = { width: video.videoWidth, height: video.videoHeight, duration: Math.floor(video.duration), file: file };
+                    videoMeta.width = video.videoWidth;
+                    videoMeta.height = video.videoHeight;
+                    videoMeta.duration = Math.floor(video.duration);
                     
-                    minSlider.max = videoMeta.duration;
-                    maxSlider.max = videoMeta.duration;
+                    minSlider.max = videoMeta.duration; 
+                    maxSlider.max = videoMeta.duration; 
                     maxSlider.value = videoMeta.duration;
                     updateSliderTrack();
-                }
+                };
+                
+                // If NixOS Electron CANNOT read proprietary MP4s, use safe fallbacks
+                video.onerror = function() {
+                    console.warn("NixOS Chromium lacks H.264 codecs. Using fallback metadata.");
+                    videoMeta.width = 1280;
+                    videoMeta.height = 720;
+                    videoMeta.duration = 600; // Default slider to 10 minutes (600s)
+                    
+                    minSlider.max = 600; 
+                    maxSlider.max = 600; 
+                    maxSlider.value = 600;
+                    updateSliderTrack();
+                };
+                
                 video.src = URL.createObjectURL(file);
             });
 
             generateBtn.addEventListener('click', processVideo);
         }
 
-        // --- IMAGE GENERATION ---
-        async function createLetterImage(letter, index, width, height) {
+        async function createLetterImageBase64(letter, index, width, height) {
             const canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
+            canvas.width = width; canvas.height = height;
             const ctx = canvas.getContext('2d');
 
-            const r = Math.floor(Math.random() * 256);
-            const g = Math.floor(Math.random() * 256);
-            const b = Math.floor(Math.random() * 256);
+            const r = Math.floor(Math.random() * 256), g = Math.floor(Math.random() * 256), b = Math.floor(Math.random() * 256);
             ctx.fillStyle = `rgb(${r},${g},${b})`;
             ctx.fillRect(0, 0, width, height);
 
-            const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-            ctx.fillStyle = luminance > 128 ? '#000000' : '#FFFFFF';
+            ctx.fillStyle = (0.299 * r + 0.587 * g + 0.114 * b) > 128 ? '#000000' : '#FFFFFF';
 
             const mainFontSize = Math.floor(height * 0.5);
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             ctx.font = `bold ${mainFontSize}px "Comic Sans MS", "Comic Sans", cursive, sans-serif`;
             ctx.fillText(letter.toUpperCase(), width / 2, height / 2);
 
-            const subFontSize = Math.floor(mainFontSize * 0.5);
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'top';
-            ctx.font = `bold ${subFontSize}px "Comic Sans MS", "Comic Sans", cursive, sans-serif`;
+            ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+            ctx.font = `bold ${Math.floor(mainFontSize * 0.5)}px "Comic Sans MS", "Comic Sans", cursive, sans-serif`;
             ctx.fillText(index.toString(), 20, 20);
 
-            return new Promise(resolve => {
-                canvas.toBlob(blob => resolve(new File([blob], `img_${index}.png`, { type: 'image/png' })));
-            });
+            return canvas.toDataURL('image/png');
         }
 
-        // --- TIMESTAMP LOGIC ---
         function calculateTimestamps(wordLength, startRange, endRange) {
             const cycleTime = IMAGE_DURATION + MIN_GAP_SECONDS;
             const requiredTime = (wordLength - 1) * cycleTime + IMAGE_DURATION;
             const availableTime = endRange - startRange;
+            if (availableTime < requiredTime) throw new Error(`Time range too small! You need at least ${formatTime(requiredTime)}.`);
 
-            if (availableTime < requiredTime) {
-                throw new Error(`Time range too small! You need at least ${formatTime(requiredTime)} for a ${wordLength}-letter word.`);
-            }
-
-            let timestamps = [];
-            let currentMinStart = startRange;
-            let remainingSlack = availableTime - requiredTime;
-
+            let timestamps = [], currentMinStart = startRange, remainingSlack = availableTime - requiredTime;
             for (let i = 0; i < wordLength; i++) {
                 const slackForThisStep = Math.random() * (remainingSlack / (wordLength - i));
                 remainingSlack -= slackForThisStep;
-
                 const t = currentMinStart + slackForThisStep;
                 timestamps.push(t.toFixed(2));
                 currentMinStart = t + cycleTime;
@@ -273,36 +240,26 @@
             return timestamps;
         }
 
-        function readFileWithProgress(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onprogress = (e) => {
-                    if (e.lengthComputable) {
-                        progressBar.value = (e.loaded / e.total) * 100;
-                    }
-                };
-                reader.onload = () => resolve(new Uint8Array(reader.result));
-                reader.onerror = reject;
-                reader.readAsArrayBuffer(file);
-            });
-        }
+        // Listen for progress from the native backend
+        window.api.onProgress((percent) => {
+            progressBar.value = percent;
+        });
 
-        // --- MAIN PROCESSING ---
         async function processVideo() {
             const secretPhrase = secretPhraseInput.value.trim();
-            if (!videoMeta.file || !secretPhrase) {
-                alert("Please select a video and enter a secret phrase.");
+            const file = videoUpload.files[0];
+            
+            // Double check both the file input and our meta object
+            if ((!videoMeta.path && !file) || !secretPhrase) {
+                alert("Please select a video and enter a secret phrase."); 
                 return;
             }
-
-            const earliestTime = parseInt(minSlider.value);
-            const latestTime = parseInt(maxSlider.value);
+            // Ensure path is set even if metadata completely stalled
+            if (!videoMeta.path) videoMeta.path = file.path;
             
-            // Choose word and prepare for shuffling
             const word = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
             let letterData = word.split('').map((char, index) => ({ char: char, pos: index + 1 }));
             
-            // Fisher-Yates shuffle the letters so they appear out of order
             for (let i = letterData.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [letterData[i], letterData[j]] = [letterData[j], letterData[i]];
@@ -310,148 +267,64 @@
             
             let timestamps;
             try {
-                timestamps = calculateTimestamps(word.length, earliestTime, latestTime);
+                timestamps = calculateTimestamps(word.length, parseInt(minSlider.value), parseInt(maxSlider.value));
             } catch (err) {
-                alert(err.message);
-                return;
+                alert(err.message); return;
             }
 
-            // --- DEBUG OUTPUT ---
-            console.log(`[DEBUG] Chosen Decryption Word: "${word}"`);
-            letterData.forEach((item, i) => {
-                const start = parseFloat(timestamps[i]).toFixed(2);
-                const end = (parseFloat(timestamps[i]) + IMAGE_DURATION).toFixed(2);
-                console.log(`[DEBUG] Image ${i+1} (Letter: '${item.char.toUpperCase()}', Original Pos: ${item.pos}) | Scheduled: ${formatTime(start)} -> ${formatTime(end)}`);
-            });
-
             statusContainer.classList.remove('hidden');
-            statusMsg.textContent = "Loading FFmpeg...";
+            statusMsg.textContent = "Generating images...";
             statusMsg.className = "";
             progressBar.value = 0;
             generateBtn.disabled = true;
 
-            try {
-                const ffmpeg = createFFmpeg({ log: true });
-                
-                ffmpeg.setProgress(({ ratio }) => {
-                    progressBar.value = Math.max(0, Math.min(ratio * 100, 100));
-                });
+            let imagesBase64 = [];
+            for (let i = 0; i < letterData.length; i++) {
+                imagesBase64.push(await createLetterImageBase64(letterData[i].char, letterData[i].pos, videoMeta.width, videoMeta.height));
+            }
 
-                if (!ffmpeg.isLoaded()) await ffmpeg.load();
+            statusMsg.textContent = "Encoding video natively...";
 
-                statusMsg.textContent = "Loading video into memory...";
-                const fileData = await readFileWithProgress(videoMeta.file);
-                ffmpeg.FS('writeFile', 'input.mp4', fileData);
+            // Send everything to Node.js!
+            const result = await window.api.processVideo({
+                videoPath: videoMeta.path,
+                images: imagesBase64,
+                timestamps: timestamps,
+                duration: videoMeta.duration
+            });
 
-                statusMsg.textContent = "Generating images & Preparing Timeline...";
-                progressBar.value = 0;
-                
-                let filterGraph = "";
-                let inputArgs = ['-i', 'input.mp4'];
-
-                for (let i = 0; i < letterData.length; i++) {
-                    const item = letterData[i];
-                    const imgFile = await createLetterImage(item.char, item.pos, videoMeta.width, videoMeta.height);
-                    const fileName = `img${i}.png`;
-                    ffmpeg.FS('writeFile', fileName, await fetchFile(imgFile));
-                    
-                    inputArgs.push('-i', fileName);
-
-                    const inBase = i === 0 ? '0:v' : `v${i}`;
-                    const outBase = `v${i + 1}`;
-                    const tStart = timestamps[i];
-                    const tEnd = (parseFloat(tStart) + IMAGE_DURATION).toFixed(2);
-                    const isLast = i === letterData.length - 1;
-                    const outLabel = isLast ? 'outv' : outBase;
-                    
-                    filterGraph += `[${inBase}][${i + 1}:v]overlay=enable='between(t,${tStart},${tEnd})'[${outLabel}];`;
-                }
-
-                // FIXED: Remove the trailing semicolon!
-                if (filterGraph.endsWith(';')) {
-                    filterGraph = filterGraph.slice(0, -1);
-                }
-
-                statusMsg.textContent = "Rendering final video... (This might take a while)";
-
-                const args = [
-                    ...inputArgs,
-                    '-filter_complex', filterGraph,
-                    '-map', '[outv]',
-                    '-map', '0:a?', 
-                    '-c:v', 'libx264',     // Force H.264 encoding
-                    '-pix_fmt', 'yuv420p', // Force standard MP4 pixel format
-                    '-c:a', 'copy',        // Keep original audio
-                    '-preset', 'ultrafast',
-                    'output.mp4'
-                ];
-
-                await ffmpeg.run(...args);
-
-                statusMsg.textContent = "Finalizing and Encrypting...";
-                
-                let data;
-                try {
-                    data = ffmpeg.FS('readFile', 'output.mp4');
-                } catch (readErr) {
-                    throw new Error("FFmpeg failed to create output.mp4. Check the browser console (F12) for the exact FFmpeg error.");
-                }
-
-                const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
-                const downloadLink = document.createElement('a');
-                downloadLink.href = URL.createObjectURL(videoBlob);
-                downloadLink.download = 'cipher_video.mp4';
-                downloadLink.click();
-
+            if (result.success) {
+                statusMsg.textContent = "Success! Redirecting...";
                 const encrypted = CryptoJS.AES.encrypt(secretPhrase, word).toString();
-                const safeEncrypted = encodeURIComponent(encrypted);
-                
-                statusMsg.textContent = "Success! Redirecting to decryption page...";
-                setTimeout(() => {
-                    window.location.href = `?secret=${safeEncrypted}`;
-                }, 2000);
-
-            } catch (err) {
-                console.error(err);
-                statusMsg.textContent = err.message || "An error occurred during processing.";
+                setTimeout(() => window.location.href = `?secret=${encodeURIComponent(encrypted)}`, 1500);
+            } else {
+                statusMsg.textContent = result.error || "Encoding cancelled or failed.";
                 statusMsg.className = "error";
                 generateBtn.disabled = false;
             }
         }
 
-        // --- DECRYPTION MODE LOGIC ---
         function initDecryptionMode() {
-            const decryptBtn = document.getElementById('decrypt-btn');
-            const decryptStatus = document.getElementById('decrypt-status');
-            const guessInput = document.getElementById('word-guess');
-
-            decryptBtn.addEventListener('click', () => {
+            document.getElementById('decrypt-btn').addEventListener('click', () => {
                 const now = Date.now();
                 const lastAttempt = localStorage.getItem('lastDecryptAttempt') || 0;
-                
                 if (now - lastAttempt < 60000) {
-                    const remaining = Math.ceil((60000 - (now - lastAttempt)) / 1000);
-                    decryptStatus.textContent = `Please wait ${remaining} seconds before trying again.`;
-                    decryptStatus.className = "error";
-                    return;
+                    document.getElementById('decrypt-status').textContent = `Wait ${Math.ceil((60000 - (now - lastAttempt)) / 1000)} seconds.`;
+                    document.getElementById('decrypt-status').className = "error"; return;
                 }
-
-                const guess = guessInput.value.trim().toLowerCase();
+                const guess = document.getElementById('word-guess').value.trim().toLowerCase();
                 if (!guess) return;
 
                 localStorage.setItem('lastDecryptAttempt', now.toString());
-
                 try {
                     const decrypted = CryptoJS.AES.decrypt(decodeURIComponent(encryptedSecret), guess).toString(CryptoJS.enc.Utf8);
                     if (decrypted) {
-                        decryptStatus.textContent = `Success! Secret Phrase: "${decrypted}"`;
-                        decryptStatus.style.color = 'green';
-                    } else {
-                        throw new Error("Wrong key");
-                    }
+                        document.getElementById('decrypt-status').textContent = `Secret Phrase: "${decrypted}"`;
+                        document.getElementById('decrypt-status').style.color = 'green';
+                    } else throw new Error();
                 } catch(e) {
-                    decryptStatus.textContent = "Incorrect word. Try again in 1 minute.";
-                    decryptStatus.className = "error";
+                    document.getElementById('decrypt-status').textContent = "Incorrect. Try again in 1 minute.";
+                    document.getElementById('decrypt-status').className = "error";
                 }
             });
         }
