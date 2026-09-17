@@ -19,6 +19,10 @@ Better pay attention because each letter is only visible for 2 seconds and the o
 - Online version (Slow!): Easier to use/run
   - Secret phrase is encrypted in the URL, so it can be accessed from anywhere at any time.
 
+![encrypt screen](img/encrypt.png)
+
+![decrypt screen](img/decrypt.png)
+
 ## Technical requirements for desktop app:
 
 - Requires `ffmpeg` pre-installed
