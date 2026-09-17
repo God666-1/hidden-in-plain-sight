@@ -28,5 +28,5 @@ Better pay attention because each letter is only visible for 2 seconds and the o
 ## Technical requirements for desktop app:
 
 - Requires `ffmpeg` pre-installed
-- Electron application. Start with `electron .`
+- Electron application. Start with `electron desktop/`
 - Only tested on Linux (NixOS, though any OS should work if you have the required components (ffmpeg, electron/node) installed).
