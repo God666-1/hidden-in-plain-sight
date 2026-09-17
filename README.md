@@ -2,6 +2,8 @@
 
 - Vibecoded!
 
+Try it: <https://god666-1.github.io/hidden-in-plain-sight/>
+
 How to use:
 - Choose a video
 - Add your secret phrase
